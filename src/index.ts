@@ -4,7 +4,28 @@ import { Bot, GrammyError, HttpError, Context, InlineKeyboard } from 'grammy';
 import { SessionState } from './models/enum';
 import { Players } from './models/players';
 
-const session:Session = new Session()
+const sessions:Map<number, Session> = new Map<number, Session>()
+
+function getSession(ctx : Context) : Session {
+    if (!ctx.from?.id) {
+        throw new Error("Unknown UserId")
+    }
+    const userId: number = ctx.from.id
+    let session = sessions.get(userId)
+    if (!session) {
+        session = new Session()
+        sessions.set(userId, session)
+    }
+    return session
+}
+
+function resetSession(ctx : Context) : void {
+    if (!ctx.from?.id) {
+        throw new Error("Unknown UserId")
+    }
+    const userId: number = ctx.from.id
+    sessions.set(userId, new Session())
+}
 
 const BOT_API_KEY = process.env.BOT_API_KEY;
 
@@ -22,15 +43,18 @@ bot.api.setMyCommands([
 
 bot.command('start', async (ctx) => {
     await ctx.reply('Привет! Начнём?')
+    await set_games_count(ctx)
  },
 );
 
 async function new_game(ctx:Context) : Promise<void> {
+    const session = getSession(ctx)
     session.currentGameNumber++
     await ctx.reply(`Начата игра ${session.currentGameNumber} из ${session.gamesCount}`)
 }
 
 async function set_player_count(ctx:Context, player_count:number) : Promise<void> {
+    const session = getSession(ctx)
     session.playersCount = player_count
     session.players = new Players()
     session.sessionState = SessionState.EnterPlayerNameEast
@@ -39,6 +63,7 @@ async function set_player_count(ctx:Context, player_count:number) : Promise<void
 }
 
 async function set_player_name_east(ctx:Context, name: string) : Promise<void> {
+    const session = getSession(ctx)
     session.players.east.name = name
     session.sessionState = SessionState.EnterPlayerNameSouth
     await ctx.reply('Введите имя игрока на юге')
@@ -46,6 +71,7 @@ async function set_player_name_east(ctx:Context, name: string) : Promise<void> {
 }
 
 async function set_player_name_south(ctx:Context, name: string) : Promise<void> {
+    const session = getSession(ctx)
     session.players.south.name = name
     session.sessionState = SessionState.EnterPlayerNameWest
     await ctx.reply('Введите имя игрока на западе')
@@ -53,6 +79,7 @@ async function set_player_name_south(ctx:Context, name: string) : Promise<void> 
 }
 
 async function set_player_name_west(ctx:Context, name: string) : Promise<void> {
+    const session = getSession(ctx)
     session.players.west.name = name
     console.log('set_player_name_west', session)
     if (session.playersCount === 4) {
@@ -65,12 +92,14 @@ async function set_player_name_west(ctx:Context, name: string) : Promise<void> {
 }
 
 async function set_player_name_nord(ctx:Context, name: string) : Promise<void> {
+    const session = getSession(ctx)
     session.players.nord.name = name
     console.log('set_player_name_nord', session)
     await check_players(ctx)
 }
 
 async function check_players(ctx:Context) {
+    const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
         .text('Да', 'new_session.check_players.yes')
         .text('Нет', 'new_session.check_players.no')
@@ -80,6 +109,8 @@ async function check_players(ctx:Context) {
 }
 
 async function new_session(ctx:Context, games_in_session:number) : Promise<void> {
+    resetSession(ctx)
+    const session = getSession(ctx)
     await ctx.reply(`Запускаем сессию. Сдач в сессии: ${games_in_session}`)
     session.gamesCount = games_in_session
     const inlineKeyboard = new InlineKeyboard()
@@ -91,28 +122,33 @@ async function new_session(ctx:Context, games_in_session:number) : Promise<void>
     console.log('new_session', session)
 }
 
-bot.command('new_game', async (ctx) => {
-    await new_session(ctx, 1)
- },
-);
-
-bot.command('new_session', async (ctx) => {
+async function set_games_count(ctx:Context) : Promise<void> {
     const inlineKeyboard = new InlineKeyboard()
-        .text('10', 'new_session.session_count.10')
-        .text('8', 'new_session.session_count.8')
-        .text('4', 'new_session.session_count.4')
-    //    .text('другое', 'new_session.session_count.0')
+        .text('10', 'new_session.games_count.10')
+        .text('8', 'new_session.games_count.8')
+        .text('4', 'new_session.games_count.4')
+        .text('1', 'new_session.games_count.1')
+    //    .text('другое', 'new_session.games_count.0')
     await ctx.reply('Сколько будет сдач в сессии?', {
         reply_markup: inlineKeyboard
     });
- },
+}
+
+bot.command('new_game', async (ctx) => {
+        await new_session(ctx, 1)
+    },
+);
+
+bot.command('new_session', async (ctx) => {
+        await set_games_count(ctx)
+    },
 );
 
 bot.on('callback_query:data', async (ctx) => {
-    // console.log(ctx.callbackQuery)
+    const session = getSession(ctx)
     const dataKey = ctx.callbackQuery.data
-    if (dataKey.startsWith('new_session.session_count.')) {
-        const games_in_session = parseInt(dataKey.replace('new_session.session_count.', ''))
+    if (dataKey.startsWith('new_session.games_count.')) {
+        const games_in_session = parseInt(dataKey.replace('new_session.games_count.', ''))
         await new_session(ctx, games_in_session)
     }
     else if (dataKey.startsWith('new_session.player_count.')) {
@@ -133,6 +169,7 @@ bot.on('callback_query:data', async (ctx) => {
 
 // Ответ на любое сообщение
 bot.on('message:text', async (ctx) => {
+    const session = getSession(ctx)
     if (session.sessionState === SessionState.EnterPlayerNameEast) {
         await set_player_name_east(ctx, ctx.message.text)
     }
