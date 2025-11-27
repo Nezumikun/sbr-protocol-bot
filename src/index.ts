@@ -1,36 +1,26 @@
 import 'dotenv/config';
+import { Bot, GrammyError, HttpError, Context, InlineKeyboard, session, SessionFlavor } from 'grammy';
+import { FileAdapter } from '@grammyjs/storage-file';
 import { Session } from '../src/models/session'
-import { Bot, GrammyError, HttpError, Context, InlineKeyboard } from 'grammy';
 import { SessionState } from './models/enumSessionState';
 import { PlayerState } from './models/enumPlayerState';
 import { GameEventType } from './models/enumGameEventType';
-import { Player } from './models/player';
 import { EventPlayer, GameEvent } from './models/gameEvent';
 import { Game } from './models/game';
+import { SessionData } from './models/sessionData';
 
-const sessions:Map<number, Session> = new Map<number, Session>()
+type MyContext = Context & SessionFlavor<SessionData>;
+
 const magicNumberForWall = 88
-const magicNumberForExposedKong = 111
 
-function getSession(ctx : Context) : Session {
-    if (!ctx.from?.id) {
-        throw new Error("Unknown UserId")
-    }
-    const userId: number = ctx.from.id
-    let session = sessions.get(userId)
-    if (!session) {
-        session = new Session()
-        sessions.set(userId, session)
-    }
+function getSession(ctx : MyContext) : Session {
+    const session = new Session(ctx.session)
+    ctx.session = session
     return session
 }
 
-function resetSession(ctx : Context) : void {
-    if (!ctx.from?.id) {
-        throw new Error("Unknown UserId")
-    }
-    const userId: number = ctx.from.id
-    sessions.set(userId, new Session())
+function resetSession(ctx : MyContext) : void {
+    ctx.session = new Session()
 }
 
 const BOT_API_KEY = process.env.BOT_API_KEY;
@@ -39,7 +29,15 @@ if (!BOT_API_KEY) {
     throw new Error('BOT_API_KEY is not defined');
 }
 
-const bot = new Bot(BOT_API_KEY);
+const bot = new Bot<MyContext>(BOT_API_KEY);
+bot.use(
+    session({
+        initial: () => (new Session()),
+        storage: new FileAdapter({
+            dirName: "storage/sessions",
+        }),
+    })
+);
 
 bot.api.setMyCommands([
     { command: 'new_game', description: 'Начать игру' },
@@ -53,7 +51,7 @@ bot.command('start', async (ctx) => {
  },
 );
 
-async function new_game(ctx:Context) : Promise<void> {
+async function new_game(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     session.currentGameIndex++
     session.state = SessionState.Play
@@ -62,7 +60,7 @@ async function new_game(ctx:Context) : Promise<void> {
     await enter_game_event(ctx)
 }
 
-async function enter_game_event(ctx:Context) : Promise<void> {
+async function enter_game_event(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     session.state = SessionState.Play
     const inlineKeyboard = new InlineKeyboard()
@@ -74,7 +72,7 @@ async function enter_game_event(ctx:Context) : Promise<void> {
     })
 }
 
-async function enter_mahjong_player(ctx: Context) : Promise<void> {
+async function enter_mahjong_player(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
     for (let i : number = 0; i < 4; i++) {
@@ -88,7 +86,7 @@ async function enter_mahjong_player(ctx: Context) : Promise<void> {
     })
 }
 
-async function enter_kong_player(ctx: Context) : Promise<void> {
+async function enter_kong_player(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
     for (let i : number = 0; i < 4; i++) {
@@ -102,7 +100,7 @@ async function enter_kong_player(ctx: Context) : Promise<void> {
     })
 }
 
-async function enter_mahjong_from(ctx: Context, player: EventPlayer) : Promise<void> {
+async function enter_mahjong_from(ctx:MyContext, player: EventPlayer) : Promise<void> {
     const session = getSession(ctx)
     session.currentEvent.player = player
     const inlineKeyboard = new InlineKeyboard()
@@ -121,7 +119,7 @@ async function enter_mahjong_from(ctx: Context, player: EventPlayer) : Promise<v
     })
 }
 
-async function enter_kong_from(ctx: Context, player: EventPlayer) : Promise<void> {
+async function enter_kong_from(ctx:MyContext, player: EventPlayer) : Promise<void> {
     const session = getSession(ctx)
     session.currentEvent.player = player
     const inlineKeyboard = new InlineKeyboard()
@@ -136,7 +134,7 @@ async function enter_kong_from(ctx: Context, player: EventPlayer) : Promise<void
     })
 }
 
-async function save_event(ctx:Context) : Promise<void> {
+async function save_event(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     const event= session.currentEvent
     session.getCurrentGame().events.push(new GameEvent(event.type, event.player, event.from))
@@ -144,7 +142,7 @@ async function save_event(ctx:Context) : Promise<void> {
     await enter_game_event(ctx)
 }
 
-async function set_player_count(ctx:Context, player_count:number) : Promise<void> {
+async function set_player_count(ctx:MyContext, player_count:number) : Promise<void> {
     const session = getSession(ctx)
     session.playersCount = player_count
     session.resetPlayers()
@@ -156,12 +154,12 @@ async function set_player_count(ctx:Context, player_count:number) : Promise<void
     console.log('set_player_count', session)
 }
 
-async function enter_not_to_come_place(ctx: Context) {
+async function enter_not_to_come_place(ctx:MyContext) {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
     for (let i : number = 0; i < 4; i++) {
         if (session.players[i].place === 'east') continue
-        inlineKeyboard.text(session.players[i].getPlaceName(), 'new_session.not_to_come_place.' + i.toString())
+        inlineKeyboard.text(Session.getPlaceName(session.players[i].place), 'new_session.not_to_come_place.' + i.toString())
     }
     session.state = SessionState.EnterNotComePlace
     await ctx.reply('На каком месте нет игрока?', {
@@ -169,33 +167,33 @@ async function enter_not_to_come_place(ctx: Context) {
     })
 }
 
-async function set_not_to_come_place(ctx: Context, playerIndex: number) {
+async function set_not_to_come_place(ctx:MyContext, playerIndex: number) {
     const session = getSession(ctx)
     session.players[playerIndex].state = PlayerState.NotToCome
     await enter_player_name_east(ctx)
 }
 
-async function enter_player_name_east(ctx: Context) {
+async function enter_player_name_east(ctx:MyContext) {
     const session = getSession(ctx)
     session.state = SessionState.EnterPlayersNames
     await ctx.reply('Восток: введите имя игрока')
 }
 
-async function set_player_name(ctx:Context, name: string) : Promise<void> {
+async function set_player_name(ctx:MyContext, name: string) : Promise<void> {
     const session = getSession(ctx)
     const playerIndex = session.players.findIndex((item) => item.state === PlayerState.InGame && item.name === '')
     session.players[playerIndex].name = name
     console.log('set_player_name', session)
     const playerNextIndex = session.players.findIndex((item) => item.state === PlayerState.InGame && item.name === '')
     if (playerNextIndex > -1) {
-        await ctx.reply(session.players[playerNextIndex].getPlaceName() + ': введите имя игрока')
+        await ctx.reply(Session.getPlaceName(session.players[playerNextIndex].place) + ': введите имя игрока')
     }
     else {
         await check_players(ctx)
     }
 }
 
-async function check_players(ctx:Context) {
+async function check_players(ctx:MyContext) {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
         .text('Да', 'new_session.check_players.yes')
@@ -203,7 +201,7 @@ async function check_players(ctx:Context) {
     const message: string[] = [ 'Рассадка:' ]
     for (let i : number = 0; i < 4; i++) {
         if (session.players[i].state !== PlayerState.NotToCome) {
-            message.push(session.players[i].getPlaceName() + ': ' + session.players[i].name)
+            message.push(Session.getPlaceName(session.players[i].place) + ': ' + session.players[i].name)
         }
     }
     message.push('Всё верно?')
@@ -213,7 +211,7 @@ async function check_players(ctx:Context) {
     })
 }
 
-async function new_session(ctx:Context, games_in_session:number) : Promise<void> {
+async function new_session(ctx:MyContext, games_in_session:number) : Promise<void> {
     resetSession(ctx)
     const session = getSession(ctx)
     await ctx.reply(`Запускаем сессию. Сдач в сессии: ${games_in_session}`)
@@ -228,7 +226,7 @@ async function new_session(ctx:Context, games_in_session:number) : Promise<void>
     console.log('new_session', session)
 }
 
-async function set_games_count(ctx:Context) : Promise<void> {
+async function set_games_count(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
         .text('10', 'new_session.games_count.10')
