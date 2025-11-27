@@ -3,8 +3,14 @@ import { Session } from '../src/models/session'
 import { Bot, GrammyError, HttpError, Context, InlineKeyboard } from 'grammy';
 import { SessionState } from './models/enumSessionState';
 import { PlayerState } from './models/enumPlayerState';
+import { GameEventType } from './models/enumGameEventType';
+import { Player } from './models/player';
+import { EventPlayer, GameEvent } from './models/gameEvent';
+import { Game } from './models/game';
 
 const sessions:Map<number, Session> = new Map<number, Session>()
+const magicNumberForWall = 88
+const magicNumberForExposedKong = 111
 
 function getSession(ctx : Context) : Session {
     if (!ctx.from?.id) {
@@ -49,9 +55,93 @@ bot.command('start', async (ctx) => {
 
 async function new_game(ctx:Context) : Promise<void> {
     const session = getSession(ctx)
-    session.currentGameNumber++
+    session.currentGameIndex++
     session.state = SessionState.Play
-    await ctx.reply(`Начата игра ${session.currentGameNumber} из ${session.gamesLimit}`)
+    session.games.push(new Game())
+    await ctx.reply(`Начата игра ${session.currentGameIndex + 1} из ${session.gamesLimit}`)
+    await enter_game_event(ctx)
+}
+
+async function enter_game_event(ctx:Context) : Promise<void> {
+    const session = getSession(ctx)
+    session.state = SessionState.Play
+    const inlineKeyboard = new InlineKeyboard()
+        .text('Маджонг', 'game_event.select.mahjong')
+        .text('Конг', 'game_event.select.kong')
+        .text('Стена закончилась', 'game_event.select.end_of_wall')
+    await ctx.reply("Добавим событие?", {
+        reply_markup: inlineKeyboard
+    })
+}
+
+async function enter_mahjong_player(ctx: Context) : Promise<void> {
+    const session = getSession(ctx)
+    const inlineKeyboard = new InlineKeyboard()
+    for (let i : number = 0; i < 4; i++) {
+        if (session.players[i].state !== PlayerState.InGame) continue
+        inlineKeyboard.text(session.players[i].name, 'mahjong.player.' + i.toString())
+    }
+    session.state = SessionState.EnterMahjong
+    session.currentEvent.type = GameEventType.Mahjong
+    await ctx.reply('Кто объявил маджонг?', {
+        reply_markup: inlineKeyboard
+    })
+}
+
+async function enter_kong_player(ctx: Context) : Promise<void> {
+    const session = getSession(ctx)
+    const inlineKeyboard = new InlineKeyboard()
+    for (let i : number = 0; i < 4; i++) {
+        if (session.players[i].state !== PlayerState.InGame) continue
+        inlineKeyboard.text(session.players[i].name, 'kong.player.' + i.toString())
+    }
+    session.state = SessionState.EnterKong
+    session.currentEvent.type = GameEventType.Kong
+    await ctx.reply('Кто объявил конг?', {
+        reply_markup: inlineKeyboard
+    })
+}
+
+async function enter_mahjong_from(ctx: Context, player: EventPlayer) : Promise<void> {
+    const session = getSession(ctx)
+    session.currentEvent.player = player
+    const inlineKeyboard = new InlineKeyboard()
+        .text("Со стены", 'mahjong.from.' + magicNumberForWall.toString())
+    for (let i : number = 0; i < 4; i++) {
+        if (session.players[i].state !== PlayerState.InGame) continue
+        if (i === player) {
+            session.players[i].state = PlayerState.Mahjong
+            continue
+        }
+        inlineKeyboard.text(session.players[i].name, 'mahjong.from.' + i.toString())
+    }
+    session.state = SessionState.EnterMahjong
+    await ctx.reply('C кого взяли маджонг?', {
+        reply_markup: inlineKeyboard
+    })
+}
+
+async function enter_kong_from(ctx: Context, player: EventPlayer) : Promise<void> {
+    const session = getSession(ctx)
+    session.currentEvent.player = player
+    const inlineKeyboard = new InlineKeyboard()
+        .text("Со стены", 'kong.from.' + magicNumberForWall.toString())
+    for (let i : number = 0; i < 4; i++) {
+        if (session.players[i].state !== PlayerState.InGame) continue
+        inlineKeyboard.text((i === player) ? "Доставленный" : session.players[i].name, 'kong.from.' + i.toString())
+    }
+    session.state = SessionState.EnterKong
+    await ctx.reply('C кого взяли маджонг?', {
+        reply_markup: inlineKeyboard
+    })
+}
+
+async function save_event(ctx:Context) : Promise<void> {
+    const session = getSession(ctx)
+    const event= session.currentEvent
+    session.getCurrentGame().events.push(new GameEvent(event.type, event.player, event.from))
+    console.log(session.getCurrentGame())
+    await enter_game_event(ctx)
 }
 
 async function set_player_count(ctx:Context, player_count:number) : Promise<void> {
@@ -184,6 +274,57 @@ bot.on('callback_query:data', async (ctx) => {
         }
         else {
             await set_player_count(ctx, session.playersCount)
+        }
+    }
+    else if (session.state === SessionState.Play && dataKey.startsWith('game_event.select.')) {
+        const eventType = dataKey.replace('game_event.select.', '')
+        switch (eventType) {
+            case 'mahjong':
+                enter_mahjong_player(ctx)
+                break
+            case 'kong':
+                enter_kong_player(ctx)
+                break
+            case 'end_of_wall':
+                session.currentEvent.type = GameEventType.EndOfWall
+                session.currentEvent.player = 'wall'
+                session.currentEvent.from = 'wall'
+                await save_event(ctx)
+                break
+            default:
+                await ctx.reply('Неизвестное событие ' + eventType)
+        }
+    }
+    else if (session.state === SessionState.EnterMahjong && dataKey.startsWith('mahjong.player.')) {
+        const playerIndex = parseInt(dataKey.replace('mahjong.player.', ''))
+        if (playerIndex >= 0 && playerIndex < 4) {
+            await enter_mahjong_from(ctx, <EventPlayer>playerIndex)
+        }
+    }
+    else if (session.state === SessionState.EnterMahjong && dataKey.startsWith('mahjong.from.')) {
+        const playerIndex = parseInt(dataKey.replace('mahjong.from.', ''))
+        if (playerIndex >= 0 && playerIndex < 4) {
+            session.currentEvent.from = <EventPlayer>playerIndex
+            await save_event(ctx)
+        } else if (playerIndex === magicNumberForWall) {
+            session.currentEvent.from = 'wall'
+            await save_event(ctx)
+        }
+    }
+    else if (session.state === SessionState.EnterKong && dataKey.startsWith('kong.player.')) {
+        const playerIndex = parseInt(dataKey.replace('kong.player.', ''))
+        if (playerIndex >= 0 && playerIndex < 4) {
+            await enter_kong_from(ctx, <EventPlayer>playerIndex)
+        }
+    }
+    else if (session.state === SessionState.EnterKong && dataKey.startsWith('kong.from.')) {
+        const playerIndex = parseInt(dataKey.replace('kong.from.', ''))
+        if (playerIndex >= 0 && playerIndex < 4) {
+            session.currentEvent.from = <EventPlayer>playerIndex
+            await save_event(ctx)
+        } else if (playerIndex === magicNumberForWall) {
+            session.currentEvent.from = 'wall'
+            await save_event(ctx)
         }
     }
     await ctx.answerCallbackQuery();

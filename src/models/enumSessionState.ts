@@ -5,5 +5,7 @@ export enum SessionState {
     EnterNotComePlace,
     EnterPlayersNames,
     CheckPlayers,
-    Play
+    Play,
+    EnterMahjong,
+    EnterKong
 }
