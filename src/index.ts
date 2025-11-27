@@ -137,9 +137,84 @@ async function enter_kong_from(ctx:MyContext, player: EventPlayer) : Promise<voi
 async function save_event(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     const event= session.currentEvent
-    session.getCurrentGame().events.push(new GameEvent(event.type, event.player, event.from))
+    session.saveEvent()
     console.log(session.getCurrentGame())
-    await enter_game_event(ctx)
+    if (event.type === GameEventType.EndOfWall) {
+        await ctx.reply('Зафиксировано')
+        session.state = SessionState.Scoring
+    }
+    else if (event.type === GameEventType.Mahjong) {
+        if (session.getMahjongCount() + 1 === session.playersCount) {
+            session.state = SessionState.Scoring
+        }
+    }
+    if (session.state === SessionState.Scoring) {
+        await scoring(ctx)
+    }
+    else {
+        await enter_game_event(ctx)
+    }
+}
+
+async function scoring(ctx:MyContext) {
+    const session = getSession(ctx)
+    let indexOfPlayer = session.getIndexOfInGamePlayer()
+    if (indexOfPlayer > -1) {
+        await check_tenpai(ctx, indexOfPlayer)
+        return
+    }
+    indexOfPlayer = session.getIndexOfMahjongPlayerWithoutScore()
+    if (indexOfPlayer > -1) {
+        await enter_mahjong(ctx, indexOfPlayer)
+        return
+    }
+    await ctx.reply("Начинаем расчёты...")
+}
+
+async function check_tenpai(ctx:MyContext, playerIndex : number) {
+    const session = getSession(ctx)
+    const inlineKeyboard = new InlineKeyboard()
+        .text('Да', 'check_tenpai.' + playerIndex.toString() + '.yes')
+        .text('Нет', 'check_tenpai.' + playerIndex.toString() + '.no')
+    await ctx.reply(`Игрок ${session.players[playerIndex].name} в ожидании?`, {
+        reply_markup: inlineKeyboard
+    })
+}
+
+async function set_tenpai(ctx:MyContext, playerIndex : number) {
+    const session = getSession(ctx)
+    session.setTenpai(playerIndex)
+    await ctx.reply('Зафиксировано')
+    await scoring(ctx)
+}
+
+async function set_noten(ctx:MyContext, playerIndex : number) {
+    const session = getSession(ctx)
+    session.setNoten(playerIndex)
+    await ctx.reply('Зафиксировано')
+    await scoring(ctx)
+}
+
+async function enter_mahjong(ctx:MyContext, playerIndex : number) {
+    const session = getSession(ctx)
+    const inlineKeyboard = new InlineKeyboard()
+        .text('1', 'mahjong_score.' + playerIndex.toString() + '.1')
+        .text('2', 'mahjong_score.' + playerIndex.toString() + '.2')
+        .text('4', 'mahjong_score.' + playerIndex.toString() + '.4')
+        .text('8', 'mahjong_score.' + playerIndex.toString() + '.8')
+        .text('16', 'mahjong_score.' + playerIndex.toString() + '.16')
+        .row()
+        .text('Ложный маджонг', 'mahjong_score.' + playerIndex.toString() + '.0')
+    await ctx.reply(`Сколько стоит рука игрока ${session.players[playerIndex].name}?`, {
+        reply_markup: inlineKeyboard
+    })
+}
+
+async function set_mahjong_score(ctx:MyContext, playerIndex : number, score: number) {
+    const session = getSession(ctx)
+    session.setMahjongScore(playerIndex, score)
+    await ctx.reply('Зафиксировано')
+    await scoring(ctx)
 }
 
 async function set_player_count(ctx:MyContext, player_count:number) : Promise<void> {
@@ -324,6 +399,22 @@ bot.on('callback_query:data', async (ctx) => {
             session.currentEvent.from = 'wall'
             await save_event(ctx)
         }
+    }
+    else if (session.state === SessionState.Scoring && dataKey.startsWith('check_tenpai.')) {
+        const answer = dataKey.replace('check_tenpai.', '').split(".")
+        const playerIndex = parseInt(answer[0])
+        if (answer[1] === 'yes') {
+            set_tenpai(ctx, playerIndex)
+        }
+        else {
+            set_noten(ctx, playerIndex)
+        }
+    }
+    else if (session.state === SessionState.Scoring && dataKey.startsWith('mahjong_score.')) {
+        const answer = dataKey.replace('mahjong_score.', '').split(".")
+        const playerIndex = parseInt(answer[0])
+        const score = parseInt(answer[1])
+        set_mahjong_score(ctx, playerIndex, score)
     }
     await ctx.answerCallbackQuery();
 });

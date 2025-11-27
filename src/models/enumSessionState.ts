@@ -7,5 +7,6 @@ export enum SessionState {
     CheckPlayers,
     Play,
     EnterMahjong,
-    EnterKong
+    EnterKong,
+    Scoring
 }

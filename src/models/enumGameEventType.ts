@@ -5,5 +5,6 @@ export enum GameEventType {
     EndOfWall = 4,
     Tenpai = 5,
     Noten = 6,
-    EndGame = 7
+    EndGame = 7,
+    FakeMahjong = 8
 }

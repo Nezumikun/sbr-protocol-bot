@@ -1,4 +1,5 @@
 import { GameEventType } from "./enumGameEventType"
+import { PlayerState } from "./enumPlayerState"
 import { SessionState } from "./enumSessionState"
 import { Game } from "./game"
 import { GameEvent } from "./gameEvent"
@@ -30,6 +31,60 @@ export class Session implements SessionData {
 
     getCurrentGame() : Game {
         return this.games[this.currentGameIndex]
+    }
+
+    saveEvent() : void {
+        const event= this.currentEvent
+        const game = this.getCurrentGame()
+        game.events.push(new GameEvent(event.type, event.player, event.from))
+        if (event.type === GameEventType.Mahjong) {
+            game.mahjongCount++
+        }
+    }
+
+    getMahjongCount() : number {
+        return this.getCurrentGame().mahjongCount
+    }
+
+    getIndexOfInGamePlayer() : number {
+        return this.players.findIndex((x) => x.state === PlayerState.InGame)
+    }
+
+    getIndexOfMahjongPlayerWithoutScore() : number {
+        const event = this.getCurrentGame().events.find((x) => x.type === GameEventType.Mahjong && x.score === 0)
+        return (event && event.player !== "wall") ? event.player : -1
+    }
+
+    setTenpai(playerIndex : number) : void {
+        this.players[playerIndex].state = PlayerState.Tenpai
+    }
+
+    setNoten(playerIndex : number) : void {
+        this.players[playerIndex].state = PlayerState.Noten
+        const events = this.getCurrentGame().events
+        events.forEach((x) => {
+            if (x.player === playerIndex) {
+                x.score = 0 
+            }
+        })
+        console.log(events)
+    }
+
+    setMahjongScore(playerIndex : number, score: number) : void {
+        this.players[playerIndex].state = PlayerState.Noten
+        const events = this.getCurrentGame().events
+        events.forEach((x) => {
+            if ((x.player === playerIndex) && (x.type === GameEventType.Mahjong)) {
+                if (score === 0) {
+                    x.type = GameEventType.FakeMahjong
+                    x.score = -8
+                }
+                else {
+                    x.score = score
+                }
+            }
+        })
+        console.log(events)
     }
 
     static getPlaceName(place: PlayerPlace) : string {
