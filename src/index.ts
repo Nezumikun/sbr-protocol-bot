@@ -168,7 +168,13 @@ async function scoring(ctx:MyContext) {
         await enter_mahjong(ctx, indexOfPlayer)
         return
     }
+    indexOfPlayer = session.getIndexOfTenpaiPlayerWithoutScore()
+    if (indexOfPlayer > -1) {
+        await enter_tenpai(ctx, indexOfPlayer)
+        return
+    }
     await ctx.reply("Начинаем расчёты...")
+    session.scoring()
 }
 
 async function check_tenpai(ctx:MyContext, playerIndex : number) {
@@ -210,9 +216,29 @@ async function enter_mahjong(ctx:MyContext, playerIndex : number) {
     })
 }
 
+async function enter_tenpai(ctx:MyContext, playerIndex : number) {
+    const session = getSession(ctx)
+    const inlineKeyboard = new InlineKeyboard()
+        .text('1', 'tenpai_score.' + playerIndex.toString() + '.1')
+        .text('2', 'tenpai_score.' + playerIndex.toString() + '.2')
+        .text('4', 'tenpai_score.' + playerIndex.toString() + '.4')
+        .text('8', 'tenpai_score.' + playerIndex.toString() + '.8')
+        .text('16', 'tenpai_score.' + playerIndex.toString() + '.16')
+    await ctx.reply(`Сколько стоит ждущая рука игрока ${session.players[playerIndex].name}?`, {
+        reply_markup: inlineKeyboard
+    })
+}
+
 async function set_mahjong_score(ctx:MyContext, playerIndex : number, score: number) {
     const session = getSession(ctx)
     session.setMahjongScore(playerIndex, score)
+    await ctx.reply('Зафиксировано')
+    await scoring(ctx)
+}
+
+async function set_tenpai_score(ctx:MyContext, playerIndex : number, score: number) {
+    const session = getSession(ctx)
+    session.setTenpaiScore(playerIndex, score)
     await ctx.reply('Зафиксировано')
     await scoring(ctx)
 }
@@ -415,6 +441,12 @@ bot.on('callback_query:data', async (ctx) => {
         const playerIndex = parseInt(answer[0])
         const score = parseInt(answer[1])
         set_mahjong_score(ctx, playerIndex, score)
+    }
+    else if (session.state === SessionState.Scoring && dataKey.startsWith('tenpai_score.')) {
+        const answer = dataKey.replace('tenpai_score.', '').split(".")
+        const playerIndex = parseInt(answer[0])
+        const score = parseInt(answer[1])
+        set_tenpai_score(ctx, playerIndex, score)
     }
     await ctx.answerCallbackQuery();
 });

@@ -2,6 +2,9 @@ import { GameEvent } from "./gameEvent";
 
 export class Game {
     events : GameEvent[] = []
-    mahjongCount: number = 0
     scores : number[] = [ 0, 0, 0, 0 ]
+    logs : string[] = []
+    mahjongCount: number = 0
+    tenpaiCount: number = 0
+    notenCount: number = 0
 }
