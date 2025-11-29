@@ -34,12 +34,30 @@ export class Session implements SessionData {
     }
 
     saveEvent() : void {
-        const event = this.currentEvent
+        const event = new GameEvent(this.currentEvent.type, this.currentEvent.player, this.currentEvent.from)
         const game = this.getCurrentGame()
-        game.events.push(new GameEvent(event.type, event.player, event.from))
         if (event.type === GameEventType.Mahjong) {
             game.mahjongCount++
+            if (event.from === "wall") {
+                event.fromDetail = []
+                this.players.forEach((x, i) => {
+                    if (x.state === PlayerState.InGame && i !== event.player) {
+                        event.fromDetail.push(<EventPlayer>i)
+                    }
+                })
+            }
         }
+        else if (event.type === GameEventType.Kong) {
+            if (event.from === "wall" || event.from === event.player) {
+                event.fromDetail = []
+                this.players.forEach((x, i) => {
+                    if (x.state === PlayerState.InGame && i !== event.player) {
+                        event.fromDetail.push(<EventPlayer>i)
+                    }
+                })
+            }
+        }
+        game.events.push(event)
     }
 
     getMahjongCount() : number {
@@ -111,11 +129,11 @@ export class Session implements SessionData {
         console.log(events)
     }
 
-    scoreToString(score : number, from : EventPlayer) {
-        if (from === 'wall') {
-            score = score + 1
+    scoreToString(score : number, multipleFrom : boolean) {
+        if (multipleFrom) {
             return 'По ' + ((score > 0) ? '+' : '') +  score.toString() +  ' ' +
-                ((score === 2) ? 'очка'
+                ((score === 1) ? 'очку'
+                :(score === 2) ? 'очка'
                 : (score === 3) ? 'очка'
                 : (score === 5) ? 'очков'
                 : (score === 9) ? 'очков'
@@ -135,24 +153,42 @@ export class Session implements SessionData {
     scoring() : void {
         const game = this.getCurrentGame()
         game.scores = [0, 0, 0, 0]
-        const mahjongList : number[] = []
+        game.logs = []
         for (let i : number = 0; i < game.events.length; i++) {
             const event = game.events[i]
-            if (event.type === GameEventType.Mahjong) {
-                if (event.player === "wall") continue
-                game.scores[event.player] += (event.from === "wall") ? (this.playersCount - mahjongList.length - 1) * (event.score + 1) : event.score
-                mahjongList.push(event.player)
-                if (event.from === "wall") {
-                    const fromList : string[] = []
-                    game.scores.forEach((x, i) => {
-                        if (mahjongList.includes(i) || this.players[i].state === PlayerState.NotToCome) return
-                        game.scores[i] -= (event.score + 1)
+            const fromList : string[] = []
+            switch (event.type) {
+                case GameEventType.Mahjong:
+                    if (event.player === "wall") break
+                    game.scores[event.player] += event.fromDetail.length * (event.score + (event.from === "wall" ? 1 : 0))
+                    event.fromDetail.forEach((i) => {
+                        if (i === "wall") return
+                        game.scores[i] -= (event.score + (event.from === "wall" ? 1 : 0))
                         fromList.push(this.players[i].name)
                     })
-                    game.logs.push(`Маджонг. ${this.players[event.player].name} со стены. ${this.scoreToString(event.score, event.from)} c ${fromList.join(', ')}`)
-                } else {
-                    game.logs.push(`Маджонг. ${this.players[event.player].name} с ${this.players[event.from].name}. ${this.scoreToString(event.score, event.from)}`)
-                }
+                    if (event.from === "wall") {
+                        game.logs.push(`Маджонг. ${this.players[event.player].name} со стены. ${this.scoreToString(event.score + 1, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
+                    } else {
+                        game.logs.push(`Маджонг. ${this.players[event.player].name} с ${this.players[event.from].name}. ${this.scoreToString(event.score, false)}`)
+                    }
+                    break
+                case GameEventType.Kong:
+                    if (event.player === "wall") break
+                    game.scores[event.player] += event.fromDetail.length * event.score
+                    event.fromDetail.forEach((i) => {
+                        if ((i === "wall") || (i === event.player)) return
+                        game.scores[i] -= event.score
+                        fromList.push(this.players[i].name)
+                    })
+                    if (event.from === "wall") {
+                        console.log(event.fromDetail)
+                        game.logs.push(`Закрытый конг. ${this.players[event.player].name}. ${this.scoreToString(event.score, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
+                    } else if (event.from === event.player) {
+                        game.logs.push(`Доставленный конг. ${this.players[event.player].name}. ${this.scoreToString(event.score, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
+                    } else {
+                        game.logs.push(`Конг. ${this.players[event.player].name} с ${this.players[event.from].name}. ${this.scoreToString(event.score, false)}`)
+                    }
+                    break
             }
         }
         console.log(game)

@@ -175,6 +175,7 @@ async function scoring(ctx:MyContext) {
     }
     await ctx.reply("Начинаем расчёты...")
     session.scoring()
+    await ctx.reply('Протокол:\n' + session.getCurrentGame().logs.join('\n'))
 }
 
 async function check_tenpai(ctx:MyContext, playerIndex : number) {
