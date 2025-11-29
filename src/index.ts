@@ -53,11 +53,13 @@ bot.command('start', async (ctx) => {
 
 async function new_game(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
+    console.log(session)
     session.currentGameIndex++
     session.state = SessionState.Play
     session.games.push(new Game())
     await ctx.reply(`Начата игра ${session.currentGameIndex + 1} из ${session.gamesLimit}`)
     await enter_game_event(ctx)
+    console.log(session)
 }
 
 async function enter_game_event(ctx:MyContext) : Promise<void> {
@@ -176,6 +178,14 @@ async function scoring(ctx:MyContext) {
     await ctx.reply("Начинаем расчёты...")
     session.scoring()
     await ctx.reply('Протокол:\n' + session.getCurrentGame().logs.join('\n'))
+    await ctx.reply('Очки:\n' + session.getResults().join('\n'))
+    if (session.currentGameIndex + 1 === session.gamesLimit) {
+        await ctx.reply('Итоги:\n' + session.getSummary().join('\n'))
+        await set_games_count(ctx)
+    }
+    else {
+        await new_game(ctx)
+    }
 }
 
 async function check_tenpai(ctx:MyContext, playerIndex : number) {
@@ -314,7 +324,6 @@ async function check_players(ctx:MyContext) {
 }
 
 async function new_session(ctx:MyContext, games_in_session:number) : Promise<void> {
-    resetSession(ctx)
     const session = getSession(ctx)
     await ctx.reply(`Запускаем сессию. Сдач в сессии: ${games_in_session}`)
     session.gamesLimit = games_in_session
@@ -329,7 +338,9 @@ async function new_session(ctx:MyContext, games_in_session:number) : Promise<voi
 }
 
 async function set_games_count(ctx:MyContext) : Promise<void> {
+    resetSession(ctx)
     const session = getSession(ctx)
+    await ctx.reply('Новая сессия');
     const inlineKeyboard = new InlineKeyboard()
         .text('10', 'new_session.games_count.10')
         .text('8', 'new_session.games_count.8')
@@ -343,6 +354,7 @@ async function set_games_count(ctx:MyContext) : Promise<void> {
 }
 
 bot.command('new_game', async (ctx) => {
+        resetSession(ctx)
         await new_session(ctx, 1)
     },
 );
@@ -355,7 +367,9 @@ bot.command('new_session', async (ctx) => {
 bot.on('callback_query:data', async (ctx) => {
     const session = getSession(ctx)
     const dataKey = ctx.callbackQuery.data
+    console.log(ctx.callbackQuery, session.state)
     if (session.state === SessionState.EnterGamesCount && dataKey.startsWith('new_session.games_count.')) {
+        console.log('!!!!!')
         const games_in_session = parseInt(dataKey.replace('new_session.games_count.', ''))
         await new_session(ctx, games_in_session)
     }

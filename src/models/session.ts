@@ -5,6 +5,7 @@ import { Game } from "./game"
 import { EventPlayer, GameEvent } from "./gameEvent"
 import { Player, PlayerPlace } from "./player"
 import { SessionData } from "./sessionData"
+import _ from 'lodash'
 
 export class Session implements SessionData {
 
@@ -192,6 +193,41 @@ export class Session implements SessionData {
             }
         }
         console.log(game)
+    }
+
+    getTotal() : number[] {
+        const total: number[] = [ 0, 0, 0, 0 ]
+        this.games.forEach((g) => {
+            g.scores.forEach((s, i) => total[i] += s)
+        })
+        return total
+    }
+
+    getResults() : string[] {
+        const result : string[] = []
+        const total = this.getTotal()
+        this.players.forEach((x, i) => {
+            if (x.state === PlayerState.NotToCome) return
+            const score = this.getCurrentGame().scores[i]
+            result.push(x.name + ': ' + ((total[i] > 0) ? '+' : '') + total[i].toString() + ' (' + (score > 0? '+' : '') + score.toString() + ')')
+        })
+        return result
+    }
+
+    getSummary() : string[] {
+        const result : string[] = []
+        const total = this.getTotal()
+        let sortTotal = this.getTotal()
+        sortTotal.splice(this.players.findIndex((x) => x.state === PlayerState.NotToCome), 1)
+        sortTotal = (<number[]>(_.uniq(sortTotal))).sort((a, b) => b - a)
+        this.players.forEach((x, i) => {
+            if (x.state === PlayerState.NotToCome) return
+            const index = sortTotal.findIndex((x) => x === total[i])
+            result.push(x.name + ': ' + ((total[i] > 0) ? '+' : '') + total[i].toString() + ' ' + 
+                ((index === 0) ? '🥇' : (index === 1) ? '🥈' : (index === 2) ? '🥉' : '')
+            )
+        })
+        return result
     }
 
     static getPlaceName(place: PlayerPlace) : string {
