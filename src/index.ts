@@ -132,6 +132,7 @@ async function enter_mahjong_player(ctx:MyContext) : Promise<void> {
         if (session.data.players[i].state !== PlayerState.InGame) continue
         inlineKeyboard.text(session.data.players[i].name, 'mahjong.player.' + i.toString())
     }
+    inlineKeyboard.text("❌", "cancel")
     session.data.state = SessionState.EnterMahjong
     session.data.currentEvent.type = GameEventType.Mahjong
     await ctx.reply('Кто объявил маджонг?', {
@@ -146,6 +147,7 @@ async function enter_kong_player(ctx:MyContext) : Promise<void> {
         if (session.data.players[i].state !== PlayerState.InGame) continue
         inlineKeyboard.text(session.data.players[i].name, 'kong.player.' + i.toString())
     }
+    inlineKeyboard.text("❌", "cancel")
     session.data.state = SessionState.EnterKong
     session.data.currentEvent.type = GameEventType.Kong
     await ctx.reply('Кто объявил конг?', {
@@ -166,6 +168,7 @@ async function enter_mahjong_from(ctx:MyContext, player: EventPlayer) : Promise<
         }
         inlineKeyboard.text(session.data.players[i].name, 'mahjong.from.' + i.toString())
     }
+    inlineKeyboard.text("❌", "cancel")
     session.data.state = SessionState.EnterMahjong
     await ctx.reply('C кого взяли маджонг?', {
         reply_markup: inlineKeyboard
@@ -181,6 +184,7 @@ async function enter_kong_from(ctx:MyContext, player: EventPlayer) : Promise<voi
         if (session.data.players[i].state !== PlayerState.InGame) continue
         inlineKeyboard.text((i === player) ? "Доставленный" : session.data.players[i].name, 'kong.from.' + i.toString())
     }
+    inlineKeyboard.text("❌", "cancel")
     session.data.state = SessionState.EnterKong
     await ctx.reply('C кого взяли маджонг?', {
         reply_markup: inlineKeyboard
@@ -506,6 +510,9 @@ bot.on('callback_query:data', async (ctx) => {
         const playerIndex = parseInt(answer[0])
         const score = parseInt(answer[1])
         await set_tenpai_score(ctx, playerIndex, score)
+    }
+    else if (dataKey === "cancel") {
+        await enter_game_event(ctx)
     }
     await ctx.answerCallbackQuery();
 });

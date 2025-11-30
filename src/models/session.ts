@@ -88,7 +88,17 @@ export class Session {
     }
 
     getIndexOfInGamePlayer() : number {
-        return this.data.players.findIndex((x) => x.state === PlayerState.InGame)
+        const inGame : number[] = []
+        this.data.players.forEach((x, i) => {
+            if (x.state === PlayerState.InGame) {
+                inGame.push(i)
+            }
+        })
+        if (inGame.length === 1) {
+            this.data.players[inGame[0]].state = PlayerState.Tenpai
+            return -1
+        }
+        return (inGame.length === 0) ? -1 : inGame[0]
     }
 
     getIndexOfMahjongPlayerWithoutScore() : number {
