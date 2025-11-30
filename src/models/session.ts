@@ -7,18 +7,30 @@ import { Player, PlayerPlace } from "./player"
 import { SessionData } from "./sessionData"
 import _ from 'lodash'
 
-export class Session implements SessionData {
+export class Session {
 
-    state : SessionState = SessionState.Init
-    currentEvent : GameEvent = new GameEvent(GameEventType.BeginGame, "wall", "wall")
-    gamesLimit : number = 0
-    playersCount : number = 0
-    players : Player[] = []
-    currentGameIndex : number = -1
-    games : Game[] = []
+    data : SessionData = {
+        state: SessionState.Init,
+        currentEvent: new GameEvent(GameEventType.BeginGame, "wall", "wall"),
+        gamesLimit: 0,
+        playersCount: 0,
+        players: [],
+        currentGameIndex: -1,
+        games: []
+    }
+
+    resetData() : void {
+        this.data.state = SessionState.Init,
+        this.data.currentEvent = new GameEvent(GameEventType.BeginGame, "wall", "wall"),
+        this.data.gamesLimit = 0,
+        this.data.playersCount = 0,
+        this.data.players =  [],
+        this.data.currentGameIndex = -1,
+        this.data.games = []
+    }
 
     resetPlayers() : void {
-        this.players = [
+        this.data.players = [
             new Player("east"),
             new Player("south"),
             new Player("west"),
@@ -26,22 +38,32 @@ export class Session implements SessionData {
         ]
     }
 
+    startNewGame() : void {
+        this.data.players.forEach((x, i) => {
+            if (x.state === PlayerState.NotToCome) return
+            this.data.players[i].state = PlayerState.InGame
+        })
+        this.data.currentGameIndex++
+        this.data.games.push(new Game())
+        this.data.state = SessionState.Play
+    }
+
     getPlayerIndexBySeatPlace(place: PlayerPlace): number {
-        return this.players.findIndex((item) => item.place === place)
+        return this.data.players.findIndex((item) => item.place === place)
     }
 
     getCurrentGame() : Game {
-        return this.games[this.currentGameIndex]
+        return this.data.games[this.data.currentGameIndex]
     }
 
     saveEvent() : void {
-        const event = new GameEvent(this.currentEvent.type, this.currentEvent.player, this.currentEvent.from)
+        const event = new GameEvent(this.data.currentEvent.type, this.data.currentEvent.player, this.data.currentEvent.from)
         const game = this.getCurrentGame()
         if (event.type === GameEventType.Mahjong) {
             game.mahjongCount++
             if (event.from === "wall") {
                 event.fromDetail = []
-                this.players.forEach((x, i) => {
+                this.data.players.forEach((x, i) => {
                     if (x.state === PlayerState.InGame && i !== event.player) {
                         event.fromDetail.push(<EventPlayer>i)
                     }
@@ -51,7 +73,7 @@ export class Session implements SessionData {
         else if (event.type === GameEventType.Kong) {
             if (event.from === "wall" || event.from === event.player) {
                 event.fromDetail = []
-                this.players.forEach((x, i) => {
+                this.data.players.forEach((x, i) => {
                     if (x.state === PlayerState.InGame && i !== event.player) {
                         event.fromDetail.push(<EventPlayer>i)
                     }
@@ -66,7 +88,7 @@ export class Session implements SessionData {
     }
 
     getIndexOfInGamePlayer() : number {
-        return this.players.findIndex((x) => x.state === PlayerState.InGame)
+        return this.data.players.findIndex((x) => x.state === PlayerState.InGame)
     }
 
     getIndexOfMahjongPlayerWithoutScore() : number {
@@ -86,13 +108,13 @@ export class Session implements SessionData {
     }
 
     setTenpai(playerIndex : number) : void {
-        this.players[playerIndex].state = PlayerState.Tenpai
+        this.data.players[playerIndex].state = PlayerState.Tenpai
         this.getCurrentGame().tenpaiCount++
         this.getCurrentGame().events.push(new GameEvent(GameEventType.Tenpai, <EventPlayer>playerIndex, <EventPlayer>playerIndex))
     }
 
     setNoten(playerIndex : number) : void {
-        this.players[playerIndex].state = PlayerState.Noten
+        this.data.players[playerIndex].state = PlayerState.Noten
         this.getCurrentGame().notenCount++
         this.getCurrentGame().events.push(new GameEvent(GameEventType.Noten, <EventPlayer>playerIndex, <EventPlayer>playerIndex))
         const events = this.getCurrentGame().events
@@ -165,12 +187,12 @@ export class Session implements SessionData {
                     event.fromDetail.forEach((i) => {
                         if (i === "wall") return
                         game.scores[i] -= (event.score + (event.from === "wall" ? 1 : 0))
-                        fromList.push(this.players[i].name)
+                        fromList.push(this.data.players[i].name)
                     })
                     if (event.from === "wall") {
-                        game.logs.push(`Маджонг. ${this.players[event.player].name} со стены. ${this.scoreToString(event.score + 1, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
+                        game.logs.push(`Маджонг. ${this.data.players[event.player].name} со стены. ${this.scoreToString(event.score + 1, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
                     } else {
-                        game.logs.push(`Маджонг. ${this.players[event.player].name} с ${this.players[event.from].name}. ${this.scoreToString(event.score, false)}`)
+                        game.logs.push(`Маджонг. ${this.data.players[event.player].name} с ${this.data.players[event.from].name}. ${this.scoreToString(event.score, false)}`)
                     }
                     break
                 case GameEventType.Kong:
@@ -179,15 +201,15 @@ export class Session implements SessionData {
                     event.fromDetail.forEach((i) => {
                         if ((i === "wall") || (i === event.player)) return
                         game.scores[i] -= event.score
-                        fromList.push(this.players[i].name)
+                        fromList.push(this.data.players[i].name)
                     })
                     if (event.from === "wall") {
                         console.log(event.fromDetail)
-                        game.logs.push(`Закрытый конг. ${this.players[event.player].name}. ${this.scoreToString(event.score, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
+                        game.logs.push(`Закрытый конг. ${this.data.players[event.player].name}. ${this.scoreToString(event.score, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
                     } else if (event.from === event.player) {
-                        game.logs.push(`Доставленный конг. ${this.players[event.player].name}. ${this.scoreToString(event.score, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
+                        game.logs.push(`Доставленный конг. ${this.data.players[event.player].name}. ${this.scoreToString(event.score, event.fromDetail.length > 1)} c ${fromList.join(', ')}`)
                     } else {
-                        game.logs.push(`Конг. ${this.players[event.player].name} с ${this.players[event.from].name}. ${this.scoreToString(event.score, false)}`)
+                        game.logs.push(`Конг. ${this.data.players[event.player].name} с ${this.data.players[event.from].name}. ${this.scoreToString(event.score, false)}`)
                     }
                     break
             }
@@ -197,7 +219,7 @@ export class Session implements SessionData {
 
     getTotal() : number[] {
         const total: number[] = [ 0, 0, 0, 0 ]
-        this.games.forEach((g) => {
+        this.data.games.forEach((g) => {
             g.scores.forEach((s, i) => total[i] += s)
         })
         return total
@@ -206,7 +228,7 @@ export class Session implements SessionData {
     getResults() : string[] {
         const result : string[] = []
         const total = this.getTotal()
-        this.players.forEach((x, i) => {
+        this.data.players.forEach((x, i) => {
             if (x.state === PlayerState.NotToCome) return
             const score = this.getCurrentGame().scores[i]
             result.push(x.name + ': ' + ((total[i] > 0) ? '+' : '') + total[i].toString() + ' (' + (score > 0? '+' : '') + score.toString() + ')')
@@ -218,9 +240,9 @@ export class Session implements SessionData {
         const result : string[] = []
         const total = this.getTotal()
         let sortTotal = this.getTotal()
-        sortTotal.splice(this.players.findIndex((x) => x.state === PlayerState.NotToCome), 1)
+        sortTotal.splice(this.data.players.findIndex((x) => x.state === PlayerState.NotToCome), 1)
         sortTotal = (<number[]>(_.uniq(sortTotal))).sort((a, b) => b - a)
-        this.players.forEach((x, i) => {
+        this.data.players.forEach((x, i) => {
             if (x.state === PlayerState.NotToCome) return
             const index = sortTotal.findIndex((x) => x === total[i])
             result.push(x.name + ': ' + ((total[i] > 0) ? '+' : '') + total[i].toString() + ' ' + 
@@ -239,13 +261,7 @@ export class Session implements SessionData {
 
     constructor (data? : SessionData) {
         if (data) {
-            this.state = data.state
-            this.currentEvent = data.currentEvent
-            this.gamesLimit = data.gamesLimit
-            this.playersCount = data.playersCount
-            this.players = data.players
-            this.currentGameIndex = data.currentGameIndex
-            this.games = data.games
+            this.data = data
         } else {
             this.resetPlayers()
         }

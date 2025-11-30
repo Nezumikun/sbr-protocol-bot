@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Bot, GrammyError, HttpError, Context, InlineKeyboard, session, SessionFlavor } from 'grammy';
+import { Bot, GrammyError, HttpError, Context, InlineKeyboard, session, SessionFlavor, NextFunction } from 'grammy';
 import { FileAdapter } from '@grammyjs/storage-file';
 import { Session } from '../src/models/session'
 import { SessionState } from './models/enumSessionState';
@@ -8,19 +8,64 @@ import { GameEventType } from './models/enumGameEventType';
 import { EventPlayer, GameEvent } from './models/gameEvent';
 import { Game } from './models/game';
 import { SessionData } from './models/sessionData';
+import * as fs from 'fs';
 
-type MyContext = Context & SessionFlavor<SessionData>;
+type MyContext = Context // & SessionFlavor<SessionData>;
+
+const sessions : Map<string, SessionData> = new Map<string, SessionData>()
 
 const magicNumberForWall = 88
 
+function getSessionKey(ctx: MyContext) : string | undefined {
+    let key = undefined
+    if (ctx.chat) return ctx.chat.id.toString()
+    if (ctx.from) return ctx.from.id.toString()
+    return key
+}
+
 function getSession(ctx : MyContext) : Session {
-    const session = new Session(ctx.session)
-    ctx.session = session
+    let session = new Session()
+    const key = getSessionKey(ctx)
+    if (key) {
+        let data = sessions.get(key)
+        if (!data) {
+            data = tryToLoadSessionFromFile(key)
+            if (data) {
+                sessions.set(key, data)
+            }
+        }
+        if (data) {
+            session = new Session(data)
+        }
+        else {
+            sessions.set(key, session.data)
+        }
+    }
+    console.log(session)
     return session
 }
 
-function resetSession(ctx : MyContext) : void {
-    ctx.session = new Session()
+function tryToLoadSessionFromFile(key : string) : SessionData | undefined {
+    const filePath = './storage/sessions/' + key + '.json'
+    if (fs.existsSync(filePath)) {
+        const jsonData = fs.readFileSync(filePath, 'utf-8')
+        console.log('Load from ' + filePath)
+        return JSON.parse(jsonData)
+    }
+    return undefined
+}
+
+function saveSessionToFile(ctx: MyContext) : void {
+    const key = getSessionKey(ctx)
+    if (key) {
+        const data = sessions.get(key)
+        if (data) {
+            const jsonData = JSON.stringify(data, null, "\t")
+            const filePath = './storage/sessions/' + key + '.json'
+            fs.writeFileSync(filePath, jsonData)
+            console.log('save to ' + filePath)
+        }
+    }
 }
 
 const BOT_API_KEY = process.env.BOT_API_KEY;
@@ -29,14 +74,24 @@ if (!BOT_API_KEY) {
     throw new Error('BOT_API_KEY is not defined');
 }
 
+async function responseTime(
+    ctx: Context,
+    next: NextFunction, // is an alias for: () => Promise<void>
+): Promise<void> {
+    await next(); // make sure to `await`!
+    saveSessionToFile(ctx)
+}
+
+
 const bot = new Bot<MyContext>(BOT_API_KEY);
+bot.use(responseTime);
 bot.use(
-    session({
-        initial: () => (new Session()),
-        storage: new FileAdapter({
-            dirName: "storage/sessions",
-        }),
-    })
+    // session({
+    //     initial: () => (new Session()).data,
+    //     storage: new FileAdapter({
+    //         dirName: "storage/sessions",
+    //     }),
+    // })
 );
 
 bot.api.setMyCommands([
@@ -53,18 +108,14 @@ bot.command('start', async (ctx) => {
 
 async function new_game(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
-    console.log(session)
-    session.currentGameIndex++
-    session.state = SessionState.Play
-    session.games.push(new Game())
-    await ctx.reply(`Начата игра ${session.currentGameIndex + 1} из ${session.gamesLimit}`)
+    session.startNewGame()
+    await ctx.reply(`Начата игра ${session.data.currentGameIndex + 1} из ${session.data.gamesLimit}`)
     await enter_game_event(ctx)
-    console.log(session)
 }
 
 async function enter_game_event(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
-    session.state = SessionState.Play
+    session.data.state = SessionState.Play
     const inlineKeyboard = new InlineKeyboard()
         .text('Маджонг', 'game_event.select.mahjong')
         .text('Конг', 'game_event.select.kong')
@@ -78,11 +129,11 @@ async function enter_mahjong_player(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
     for (let i : number = 0; i < 4; i++) {
-        if (session.players[i].state !== PlayerState.InGame) continue
-        inlineKeyboard.text(session.players[i].name, 'mahjong.player.' + i.toString())
+        if (session.data.players[i].state !== PlayerState.InGame) continue
+        inlineKeyboard.text(session.data.players[i].name, 'mahjong.player.' + i.toString())
     }
-    session.state = SessionState.EnterMahjong
-    session.currentEvent.type = GameEventType.Mahjong
+    session.data.state = SessionState.EnterMahjong
+    session.data.currentEvent.type = GameEventType.Mahjong
     await ctx.reply('Кто объявил маджонг?', {
         reply_markup: inlineKeyboard
     })
@@ -92,11 +143,11 @@ async function enter_kong_player(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
     for (let i : number = 0; i < 4; i++) {
-        if (session.players[i].state !== PlayerState.InGame) continue
-        inlineKeyboard.text(session.players[i].name, 'kong.player.' + i.toString())
+        if (session.data.players[i].state !== PlayerState.InGame) continue
+        inlineKeyboard.text(session.data.players[i].name, 'kong.player.' + i.toString())
     }
-    session.state = SessionState.EnterKong
-    session.currentEvent.type = GameEventType.Kong
+    session.data.state = SessionState.EnterKong
+    session.data.currentEvent.type = GameEventType.Kong
     await ctx.reply('Кто объявил конг?', {
         reply_markup: inlineKeyboard
     })
@@ -104,18 +155,18 @@ async function enter_kong_player(ctx:MyContext) : Promise<void> {
 
 async function enter_mahjong_from(ctx:MyContext, player: EventPlayer) : Promise<void> {
     const session = getSession(ctx)
-    session.currentEvent.player = player
+    session.data.currentEvent.player = player
     const inlineKeyboard = new InlineKeyboard()
         .text("Со стены", 'mahjong.from.' + magicNumberForWall.toString())
     for (let i : number = 0; i < 4; i++) {
-        if (session.players[i].state !== PlayerState.InGame) continue
+        if (session.data.players[i].state !== PlayerState.InGame) continue
         if (i === player) {
-            session.players[i].state = PlayerState.Mahjong
+            session.data.players[i].state = PlayerState.Mahjong
             continue
         }
-        inlineKeyboard.text(session.players[i].name, 'mahjong.from.' + i.toString())
+        inlineKeyboard.text(session.data.players[i].name, 'mahjong.from.' + i.toString())
     }
-    session.state = SessionState.EnterMahjong
+    session.data.state = SessionState.EnterMahjong
     await ctx.reply('C кого взяли маджонг?', {
         reply_markup: inlineKeyboard
     })
@@ -123,14 +174,14 @@ async function enter_mahjong_from(ctx:MyContext, player: EventPlayer) : Promise<
 
 async function enter_kong_from(ctx:MyContext, player: EventPlayer) : Promise<void> {
     const session = getSession(ctx)
-    session.currentEvent.player = player
+    session.data.currentEvent.player = player
     const inlineKeyboard = new InlineKeyboard()
         .text("Со стены", 'kong.from.' + magicNumberForWall.toString())
     for (let i : number = 0; i < 4; i++) {
-        if (session.players[i].state !== PlayerState.InGame) continue
-        inlineKeyboard.text((i === player) ? "Доставленный" : session.players[i].name, 'kong.from.' + i.toString())
+        if (session.data.players[i].state !== PlayerState.InGame) continue
+        inlineKeyboard.text((i === player) ? "Доставленный" : session.data.players[i].name, 'kong.from.' + i.toString())
     }
-    session.state = SessionState.EnterKong
+    session.data.state = SessionState.EnterKong
     await ctx.reply('C кого взяли маджонг?', {
         reply_markup: inlineKeyboard
     })
@@ -138,19 +189,18 @@ async function enter_kong_from(ctx:MyContext, player: EventPlayer) : Promise<voi
 
 async function save_event(ctx:MyContext) : Promise<void> {
     const session = getSession(ctx)
-    const event= session.currentEvent
+    const event= session.data.currentEvent
     session.saveEvent()
-    console.log(session.getCurrentGame())
     if (event.type === GameEventType.EndOfWall) {
         await ctx.reply('Зафиксировано')
-        session.state = SessionState.Scoring
+        session.data.state = SessionState.Scoring
     }
     else if (event.type === GameEventType.Mahjong) {
-        if (session.getMahjongCount() + 1 === session.playersCount) {
-            session.state = SessionState.Scoring
+        if (session.getMahjongCount() + 1 === session.data.playersCount) {
+            session.data.state = SessionState.Scoring
         }
     }
-    if (session.state === SessionState.Scoring) {
+    if (session.data.state === SessionState.Scoring) {
         await scoring(ctx)
     }
     else {
@@ -179,7 +229,7 @@ async function scoring(ctx:MyContext) {
     session.scoring()
     await ctx.reply('Протокол:\n' + session.getCurrentGame().logs.join('\n'))
     await ctx.reply('Очки:\n' + session.getResults().join('\n'))
-    if (session.currentGameIndex + 1 === session.gamesLimit) {
+    if (session.data.currentGameIndex + 1 === session.data.gamesLimit) {
         await ctx.reply('Итоги:\n' + session.getSummary().join('\n'))
         await set_games_count(ctx)
     }
@@ -193,7 +243,7 @@ async function check_tenpai(ctx:MyContext, playerIndex : number) {
     const inlineKeyboard = new InlineKeyboard()
         .text('Да', 'check_tenpai.' + playerIndex.toString() + '.yes')
         .text('Нет', 'check_tenpai.' + playerIndex.toString() + '.no')
-    await ctx.reply(`Игрок ${session.players[playerIndex].name} в ожидании?`, {
+    await ctx.reply(`Игрок ${session.data.players[playerIndex].name} в ожидании?`, {
         reply_markup: inlineKeyboard
     })
 }
@@ -222,7 +272,7 @@ async function enter_mahjong(ctx:MyContext, playerIndex : number) {
         .text('16', 'mahjong_score.' + playerIndex.toString() + '.16')
         .row()
         .text('Ложный маджонг', 'mahjong_score.' + playerIndex.toString() + '.0')
-    await ctx.reply(`Сколько стоит рука игрока ${session.players[playerIndex].name}?`, {
+    await ctx.reply(`Сколько стоит рука игрока ${session.data.players[playerIndex].name}?`, {
         reply_markup: inlineKeyboard
     })
 }
@@ -235,7 +285,7 @@ async function enter_tenpai(ctx:MyContext, playerIndex : number) {
         .text('4', 'tenpai_score.' + playerIndex.toString() + '.4')
         .text('8', 'tenpai_score.' + playerIndex.toString() + '.8')
         .text('16', 'tenpai_score.' + playerIndex.toString() + '.16')
-    await ctx.reply(`Сколько стоит ждущая рука игрока ${session.players[playerIndex].name}?`, {
+    await ctx.reply(`Сколько стоит ждущая рука игрока ${session.data.players[playerIndex].name}?`, {
         reply_markup: inlineKeyboard
     })
 }
@@ -256,24 +306,23 @@ async function set_tenpai_score(ctx:MyContext, playerIndex : number, score: numb
 
 async function set_player_count(ctx:MyContext, player_count:number) : Promise<void> {
     const session = getSession(ctx)
-    session.playersCount = player_count
+    session.data.playersCount = player_count
     session.resetPlayers()
     if (player_count === 3) {
         await enter_not_to_come_place(ctx)
     } else {
         await enter_player_name_east(ctx)
     }
-    console.log('set_player_count', session)
 }
 
 async function enter_not_to_come_place(ctx:MyContext) {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
     for (let i : number = 0; i < 4; i++) {
-        if (session.players[i].place === 'east') continue
-        inlineKeyboard.text(Session.getPlaceName(session.players[i].place), 'new_session.not_to_come_place.' + i.toString())
+        if (session.data.players[i].place === 'east') continue
+        inlineKeyboard.text(Session.getPlaceName(session.data.players[i].place), 'new_session.data.not_to_come_place.' + i.toString())
     }
-    session.state = SessionState.EnterNotComePlace
+    session.data.state = SessionState.EnterNotComePlace
     await ctx.reply('На каком месте нет игрока?', {
         reply_markup: inlineKeyboard
     })
@@ -281,24 +330,23 @@ async function enter_not_to_come_place(ctx:MyContext) {
 
 async function set_not_to_come_place(ctx:MyContext, playerIndex: number) {
     const session = getSession(ctx)
-    session.players[playerIndex].state = PlayerState.NotToCome
+    session.data.players[playerIndex].state = PlayerState.NotToCome
     await enter_player_name_east(ctx)
 }
 
 async function enter_player_name_east(ctx:MyContext) {
     const session = getSession(ctx)
-    session.state = SessionState.EnterPlayersNames
+    session.data.state = SessionState.EnterPlayersNames
     await ctx.reply('Восток: введите имя игрока')
 }
 
 async function set_player_name(ctx:MyContext, name: string) : Promise<void> {
     const session = getSession(ctx)
-    const playerIndex = session.players.findIndex((item) => item.state === PlayerState.InGame && item.name === '')
-    session.players[playerIndex].name = name
-    console.log('set_player_name', session)
-    const playerNextIndex = session.players.findIndex((item) => item.state === PlayerState.InGame && item.name === '')
+    const playerIndex = session.data.players.findIndex((item) => item.state === PlayerState.InGame && item.name === '')
+    session.data.players[playerIndex].name = name
+    const playerNextIndex = session.data.players.findIndex((item) => item.state === PlayerState.InGame && item.name === '')
     if (playerNextIndex > -1) {
-        await ctx.reply(Session.getPlaceName(session.players[playerNextIndex].place) + ': введите имя игрока')
+        await ctx.reply(Session.getPlaceName(session.data.players[playerNextIndex].place) + ': введите имя игрока')
     }
     else {
         await check_players(ctx)
@@ -308,16 +356,16 @@ async function set_player_name(ctx:MyContext, name: string) : Promise<void> {
 async function check_players(ctx:MyContext) {
     const session = getSession(ctx)
     const inlineKeyboard = new InlineKeyboard()
-        .text('Да', 'new_session.check_players.yes')
-        .text('Нет', 'new_session.check_players.no')
+        .text('Да', 'new_session.data.check_players.yes')
+        .text('Нет', 'new_session.data.check_players.no')
     const message: string[] = [ 'Рассадка:' ]
     for (let i : number = 0; i < 4; i++) {
-        if (session.players[i].state !== PlayerState.NotToCome) {
-            message.push(Session.getPlaceName(session.players[i].place) + ': ' + session.players[i].name)
+        if (session.data.players[i].state !== PlayerState.NotToCome) {
+            message.push(Session.getPlaceName(session.data.players[i].place) + ': ' + session.data.players[i].name)
         }
     }
     message.push('Всё верно?')
-    session.state = SessionState.CheckPlayers
+    session.data.state = SessionState.CheckPlayers
     await ctx.reply(message.join('\n'), {
         reply_markup: inlineKeyboard
     })
@@ -326,35 +374,33 @@ async function check_players(ctx:MyContext) {
 async function new_session(ctx:MyContext, games_in_session:number) : Promise<void> {
     const session = getSession(ctx)
     await ctx.reply(`Запускаем сессию. Сдач в сессии: ${games_in_session}`)
-    session.gamesLimit = games_in_session
-    session.state = SessionState.EnterPlayerCount
+    session.data.gamesLimit = games_in_session
+    session.data.state = SessionState.EnterPlayerCount
     const inlineKeyboard = new InlineKeyboard()
-        .text('4', 'new_session.player_count.4')
-        .text('3', 'new_session.player_count.3')
+        .text('4', 'new_session.data.player_count.4')
+        .text('3', 'new_session.data.player_count.3')
     await ctx.reply('Сколько будет игроков?', {
         reply_markup: inlineKeyboard
     })
-    console.log('new_session', session)
 }
 
 async function set_games_count(ctx:MyContext) : Promise<void> {
-    resetSession(ctx)
     const session = getSession(ctx)
+    session.resetData()
     await ctx.reply('Новая сессия');
     const inlineKeyboard = new InlineKeyboard()
-        .text('10', 'new_session.games_count.10')
-        .text('8', 'new_session.games_count.8')
-        .text('4', 'new_session.games_count.4')
-        .text('1', 'new_session.games_count.1')
-    //    .text('другое', 'new_session.games_count.0')
-    session.state = SessionState.EnterGamesCount
+        .text('10', 'new_session.data.games_count.10')
+        .text('8', 'new_session.data.games_count.8')
+        .text('4', 'new_session.data.games_count.4')
+        .text('1', 'new_session.data.games_count.1')
+    //    .text('другое', 'new_session.data.games_count.0')
+    session.data.state = SessionState.EnterGamesCount
     await ctx.reply('Сколько будет сдач в сессии?', {
         reply_markup: inlineKeyboard
     });
 }
 
 bot.command('new_game', async (ctx) => {
-        resetSession(ctx)
         await new_session(ctx, 1)
     },
 );
@@ -367,101 +413,99 @@ bot.command('new_session', async (ctx) => {
 bot.on('callback_query:data', async (ctx) => {
     const session = getSession(ctx)
     const dataKey = ctx.callbackQuery.data
-    console.log(ctx.callbackQuery, session.state)
-    if (session.state === SessionState.EnterGamesCount && dataKey.startsWith('new_session.games_count.')) {
-        console.log('!!!!!')
-        const games_in_session = parseInt(dataKey.replace('new_session.games_count.', ''))
+    if (session.data.state === SessionState.EnterGamesCount && dataKey.startsWith('new_session.data.games_count.')) {
+        const games_in_session = parseInt(dataKey.replace('new_session.data.games_count.', ''))
         await new_session(ctx, games_in_session)
     }
-    else if (session.state === SessionState.EnterPlayerCount && dataKey.startsWith('new_session.player_count.')) {
-        const player_count = parseInt(dataKey.replace('new_session.player_count.', ''))
+    else if (session.data.state === SessionState.EnterPlayerCount && dataKey.startsWith('new_session.data.player_count.')) {
+        const player_count = parseInt(dataKey.replace('new_session.data.player_count.', ''))
         await set_player_count(ctx, player_count)
     }
-    else if (session.state === SessionState.EnterNotComePlace && dataKey.startsWith('new_session.not_to_come_place.')) {
-        const playerIndex = parseInt(dataKey.replace('new_session.not_to_come_place.', ''))
+    else if (session.data.state === SessionState.EnterNotComePlace && dataKey.startsWith('new_session.data.not_to_come_place.')) {
+        const playerIndex = parseInt(dataKey.replace('new_session.data.not_to_come_place.', ''))
         await set_not_to_come_place(ctx, playerIndex)
     }
-    else if (session.state === SessionState.CheckPlayers && dataKey.startsWith('new_session.check_players.')) {
-        const answer = dataKey.replace('new_session.check_players.', '')
+    else if (session.data.state === SessionState.CheckPlayers && dataKey.startsWith('new_session.data.check_players.')) {
+        const answer = dataKey.replace('new_session.data.check_players.', '')
         if (answer === 'yes') {
             await new_game(ctx)
         }
         else {
-            await set_player_count(ctx, session.playersCount)
+            await set_player_count(ctx, session.data.playersCount)
         }
     }
-    else if (session.state === SessionState.Play && dataKey.startsWith('game_event.select.')) {
+    else if (session.data.state === SessionState.Play && dataKey.startsWith('game_event.select.')) {
         const eventType = dataKey.replace('game_event.select.', '')
         switch (eventType) {
             case 'mahjong':
-                enter_mahjong_player(ctx)
+                await enter_mahjong_player(ctx)
                 break
             case 'kong':
-                enter_kong_player(ctx)
+                await enter_kong_player(ctx)
                 break
             case 'end_of_wall':
-                session.currentEvent.type = GameEventType.EndOfWall
-                session.currentEvent.player = 'wall'
-                session.currentEvent.from = 'wall'
+                session.data.currentEvent.type = GameEventType.EndOfWall
+                session.data.currentEvent.player = 'wall'
+                session.data.currentEvent.from = 'wall'
                 await save_event(ctx)
                 break
             default:
                 await ctx.reply('Неизвестное событие ' + eventType)
         }
     }
-    else if (session.state === SessionState.EnterMahjong && dataKey.startsWith('mahjong.player.')) {
+    else if (session.data.state === SessionState.EnterMahjong && dataKey.startsWith('mahjong.player.')) {
         const playerIndex = parseInt(dataKey.replace('mahjong.player.', ''))
         if (playerIndex >= 0 && playerIndex < 4) {
             await enter_mahjong_from(ctx, <EventPlayer>playerIndex)
         }
     }
-    else if (session.state === SessionState.EnterMahjong && dataKey.startsWith('mahjong.from.')) {
+    else if (session.data.state === SessionState.EnterMahjong && dataKey.startsWith('mahjong.from.')) {
         const playerIndex = parseInt(dataKey.replace('mahjong.from.', ''))
         if (playerIndex >= 0 && playerIndex < 4) {
-            session.currentEvent.from = <EventPlayer>playerIndex
+            session.data.currentEvent.from = <EventPlayer>playerIndex
             await save_event(ctx)
         } else if (playerIndex === magicNumberForWall) {
-            session.currentEvent.from = 'wall'
+            session.data.currentEvent.from = 'wall'
             await save_event(ctx)
         }
     }
-    else if (session.state === SessionState.EnterKong && dataKey.startsWith('kong.player.')) {
+    else if (session.data.state === SessionState.EnterKong && dataKey.startsWith('kong.player.')) {
         const playerIndex = parseInt(dataKey.replace('kong.player.', ''))
         if (playerIndex >= 0 && playerIndex < 4) {
             await enter_kong_from(ctx, <EventPlayer>playerIndex)
         }
     }
-    else if (session.state === SessionState.EnterKong && dataKey.startsWith('kong.from.')) {
+    else if (session.data.state === SessionState.EnterKong && dataKey.startsWith('kong.from.')) {
         const playerIndex = parseInt(dataKey.replace('kong.from.', ''))
         if (playerIndex >= 0 && playerIndex < 4) {
-            session.currentEvent.from = <EventPlayer>playerIndex
+            session.data.currentEvent.from = <EventPlayer>playerIndex
             await save_event(ctx)
         } else if (playerIndex === magicNumberForWall) {
-            session.currentEvent.from = 'wall'
+            session.data.currentEvent.from = 'wall'
             await save_event(ctx)
         }
     }
-    else if (session.state === SessionState.Scoring && dataKey.startsWith('check_tenpai.')) {
+    else if (session.data.state === SessionState.Scoring && dataKey.startsWith('check_tenpai.')) {
         const answer = dataKey.replace('check_tenpai.', '').split(".")
         const playerIndex = parseInt(answer[0])
         if (answer[1] === 'yes') {
-            set_tenpai(ctx, playerIndex)
+            await set_tenpai(ctx, playerIndex)
         }
         else {
-            set_noten(ctx, playerIndex)
+            await set_noten(ctx, playerIndex)
         }
     }
-    else if (session.state === SessionState.Scoring && dataKey.startsWith('mahjong_score.')) {
+    else if (session.data.state === SessionState.Scoring && dataKey.startsWith('mahjong_score.')) {
         const answer = dataKey.replace('mahjong_score.', '').split(".")
         const playerIndex = parseInt(answer[0])
         const score = parseInt(answer[1])
-        set_mahjong_score(ctx, playerIndex, score)
+        await set_mahjong_score(ctx, playerIndex, score)
     }
-    else if (session.state === SessionState.Scoring && dataKey.startsWith('tenpai_score.')) {
+    else if (session.data.state === SessionState.Scoring && dataKey.startsWith('tenpai_score.')) {
         const answer = dataKey.replace('tenpai_score.', '').split(".")
         const playerIndex = parseInt(answer[0])
         const score = parseInt(answer[1])
-        set_tenpai_score(ctx, playerIndex, score)
+        await set_tenpai_score(ctx, playerIndex, score)
     }
     await ctx.answerCallbackQuery();
 });
@@ -469,7 +513,7 @@ bot.on('callback_query:data', async (ctx) => {
 // Ответ на любое сообщение
 bot.on('message:text', async (ctx) => {
     const session = getSession(ctx)
-    if (session.state === SessionState.EnterPlayersNames) {
+    if (session.data.state === SessionState.EnterPlayersNames) {
         await set_player_name(ctx, ctx.message.text)
     }
     else {
