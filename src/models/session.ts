@@ -89,12 +89,16 @@ export class Session {
 
     getIndexOfInGamePlayer() : number {
         const inGame : number[] = []
+        let hasOtherTenpai : boolean = false
         this.data.players.forEach((x, i) => {
             if (x.state === PlayerState.InGame) {
                 inGame.push(i)
             }
+            else if (x.state === PlayerState.Tenpai) {
+                hasOtherTenpai = true
+            }
         })
-        if (inGame.length === 1) {
+        if (!hasOtherTenpai && (inGame.length === 1)) {
             this.data.players[inGame[0]].state = PlayerState.Tenpai
             return -1
         }
