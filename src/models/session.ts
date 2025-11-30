@@ -177,12 +177,14 @@ export class Session {
         const game = this.getCurrentGame()
         game.scores = [0, 0, 0, 0]
         game.logs = []
+        const mahjongList : EventPlayer[] = []
         for (let i : number = 0; i < game.events.length; i++) {
             const event = game.events[i]
             const fromList : string[] = []
             switch (event.type) {
                 case GameEventType.Mahjong:
                     if (event.player === "wall") break
+                    mahjongList.push(event.player)
                     game.scores[event.player] += event.fromDetail.length * (event.score + (event.from === "wall" ? 1 : 0))
                     event.fromDetail.forEach((i) => {
                         if (i === "wall") return
@@ -212,6 +214,20 @@ export class Session {
                         game.logs.push(`Конг. ${this.data.players[event.player].name} с ${this.data.players[event.from].name}. ${this.scoreToString(event.score, false)}`)
                     }
                     break
+                case GameEventType.FakeMahjong:
+                    if (event.player === "wall") break
+                    event.fromDetail = []
+                    this.data.players.forEach((x, i) => {
+                        if (mahjongList.findIndex((m) => m === i) > -1) return
+                        if (i === event.player) return
+                        if (x.state === PlayerState.NotToCome) return
+                        game.scores[i] -= event.score
+                        fromList.push(this.data.players[i].name)
+                        event.fromDetail.push(<EventPlayer>i)
+                    })
+                    game.scores[event.player] += event.fromDetail.length * event.score
+                    game.logs.push(`Ложный маджонг. ${this.data.players[event.player].name}. ${this.scoreToString(-event.score, event.fromDetail.length > 1)} уплаченного штрафа получают ${fromList.join(', ')}`)
+                    break
             }
         }
         console.log(game)
@@ -239,16 +255,21 @@ export class Session {
     getSummary() : string[] {
         const result : string[] = []
         const total = this.getTotal()
+        total.forEach((t, i) => {
+            this.data.players[i].score = t
+        })
         let sortTotal = this.getTotal()
         sortTotal.splice(this.data.players.findIndex((x) => x.state === PlayerState.NotToCome), 1)
         sortTotal = (<number[]>(_.uniq(sortTotal))).sort((a, b) => b - a)
-        this.data.players.forEach((x, i) => {
-            if (x.state === PlayerState.NotToCome) return
-            const index = sortTotal.findIndex((x) => x === total[i])
-            result.push(x.name + ': ' + ((total[i] > 0) ? '+' : '') + total[i].toString() + ' ' + 
-                ((index === 0) ? '🥇' : (index === 1) ? '🥈' : (index === 2) ? '🥉' : '')
-            )
-        })
+        this.data.players
+            .sort((a, b) => (b.score - a.score))
+            .forEach((x, i) => {
+                if (x.state === PlayerState.NotToCome) return
+                const index = sortTotal.findIndex((x) => x === total[i])
+                result.push(x.name + ': ' + ((x.score > 0) ? '+' : '') + x.score.toString() + ' ' + 
+                    ((index === 0) ? '🥇' : (index === 1) ? '🥈' : (index === 2) ? '🥉' : '')
+                )
+            })
         return result
     }
 

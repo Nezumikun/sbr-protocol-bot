@@ -74,17 +74,17 @@ if (!BOT_API_KEY) {
     throw new Error('BOT_API_KEY is not defined');
 }
 
-async function responseTime(
+async function sbrProtocolSessions(
     ctx: Context,
-    next: NextFunction, // is an alias for: () => Promise<void>
+    next: NextFunction,
 ): Promise<void> {
-    await next(); // make sure to `await`!
+    await next();
     saveSessionToFile(ctx)
 }
 
 
 const bot = new Bot<MyContext>(BOT_API_KEY);
-bot.use(responseTime);
+bot.use(sbrProtocolSessions);
 bot.use(
     // session({
     //     initial: () => (new Session()).data,
