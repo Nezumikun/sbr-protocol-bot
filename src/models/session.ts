@@ -279,7 +279,7 @@ export class Session {
             .sort((a, b) => (b.score - a.score))
             .forEach((x, i) => {
                 if (x.state === PlayerState.NotToCome) return
-                const index = sortTotal.findIndex((x) => x === total[i])
+                const index = sortTotal.findIndex((t) => t === x.score)
                 result.push(x.name + ': ' + ((x.score > 0) ? '+' : '') + x.score.toString() + ' ' + 
                     ((index === 0) ? '🥇' : (index === 1) ? '🥈' : (index === 2) ? '🥉' : '')
                 )
