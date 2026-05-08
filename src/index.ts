@@ -9,6 +9,7 @@ import { EventPlayer, GameEvent } from './models/gameEvent';
 import { Game } from './models/game';
 import { SessionData } from './models/sessionData';
 import * as fs from 'fs';
+import { SocksProxyAgent } from "socks-proxy-agent";
 
 type MyContext = Context // & SessionFlavor<SessionData>;
 
@@ -83,7 +84,19 @@ async function sbrProtocolSessions(
 }
 
 
-const bot = new Bot<MyContext>(BOT_API_KEY);
+let botConfig = {}
+if (process.env.SOCKS) {
+    const socksAgent = new SocksProxyAgent(process.env.SOCKS);
+    botConfig = {
+        client: {
+            baseFetchConfig: {
+            agent: socksAgent,
+            compress: true,
+            },
+        },
+    }
+}
+const bot = new Bot<MyContext>(BOT_API_KEY, botConfig);
 bot.use(sbrProtocolSessions);
 bot.use(
     // session({
